@@ -1,6 +1,6 @@
 // Offline: guscio dell'app dalla cache (si aggiorna in background), copertine dalla cache. API e AniList sempre dalla rete.
-const V = 'tracker-v4';
-const SHELL = ['./', 'index.html', 'app.js', 'stats.js', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'vendor/supabase.min.js', 'vendor/fonts/outfit.woff2', 'vendor/fonts/work-sans.woff2', 'apple-touch-icon.png'];
+const V = 'tracker-v5';
+const SHELL = ['./', 'index.html', 'app.js', 'stats.js', 'notes.js', 'taste.js', 'importer.js', 'suggest.js', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'vendor/supabase.min.js', 'vendor/fonts/outfit.woff2', 'vendor/fonts/work-sans.woff2', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)));

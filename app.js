@@ -15,7 +15,7 @@ const MIG_MSG = 'Per attivare preferiti e aggiornamenti automatici esegui supaba
 
 let sb, session = null, me = null, profiles = [], items = [], recs = [];
 let view = 'mine', kind = 'manga', sfv = '', rfilter = 'all', sort = 'title';
-let media = [], pending = null, stopImport = false, lastRefresh = 0, loading = false, animate = true;
+let media = [], pending = null, lastRefresh = 0, loading = false, animate = true;
 try { sort = localStorage.getItem('tracker-sort') || 'title'; } catch { /* storage non disponibile */ }
 const isLib = v => v === 'mine' || v === 'other';
 const realKind = () => KINDS[kind] ? kind : 'manga'; // 'all' e 'stats' non sono tipi veri
@@ -43,7 +43,8 @@ const IC = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
-  check: '<path d="M20 6 9 17l-5-5"/>'
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  link: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'
 };
 const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
 document.querySelectorAll('i[data-ic]').forEach(i => i.outerHTML = ic(i.dataset.ic));
@@ -98,7 +99,7 @@ const otherName = () => (otherId() && nameOf(otherId())) || 'Lux'; // finché il
 const migrated = () => !items.length || ('favorite' in items[0] && 'anilist_status' in items[0]); // migration-2 eseguita?
 const cacheSave = () => { try { localStorage.setItem(CK, JSON.stringify({ me, profiles, items, recs })); } catch { /* quota: si perde solo la copia offline */ } };
 function cacheLoad() { try { const c = JSON.parse(localStorage.getItem(CK)); if (c) ({ me, profiles, items, recs } = c); } catch { /* cache assente o rovinata */ } }
-function wipe() { items = []; recs = []; profiles = []; me = null; localStorage.removeItem(CK); render(); }
+function wipe() { items = []; recs = []; profiles = []; me = null; localStorage.removeItem(CK); SG.status = 'idle'; SG.sig = ''; SG.list = []; render(); }
 
 async function fetchAll(t, order) { // PostgREST restituisce al massimo 1000 righe per richiesta
   const out = [];
@@ -211,7 +212,8 @@ function tween(el, to, dec = 0) { // conteggio animato dei numeri
   if (to === null) { el.textContent = '—'; return; }
   if (REDUCED.matches || from === to) { el.textContent = to.toFixed(dec); return; }
   const t0 = performance.now();
-  const step = t => { const p = Math.min(1, (t - t0) / 650); el.textContent = (from + (to - from) * (1 - Math.pow(1 - p, 3))).toFixed(dec); if (p < 1) el._r = requestAnimationFrame(step); };
+  // p limitato a [0,1]: il primo fotogramma può avere un orario di poco precedente a t0
+  const step = t => { const p = Math.max(0, Math.min(1, (t - t0) / 650)); el.textContent = (from + (to - from) * (1 - Math.pow(1 - p, 3))).toFixed(dec); if (p < 1) el._r = requestAnimationFrame(step); };
   el._r = requestAnimationFrame(step);
 }
 const fade = el => { if (!REDUCED.matches && el.animate) el.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.22,1,.36,1)' }); };
@@ -296,7 +298,8 @@ function render() {
   $('av-mine').className = 'av u' + uidx(me?.id); $('av-other').className = 'av u' + (otherId() ? uidx(otherId()) : 1 - uidx(me?.id));
   $('av-me').className = 'av u' + uidx(me?.id); $('av-me').textContent = (names.mine[0] || '?').toUpperCase();
   document.querySelectorAll('#views button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === view));
-  const cnt = isRecs ? k => recs.filter(r => k === 'all' || r.kind === k).length : isCommon ? k => pairs.filter(p => k === 'all' || p[0].kind === k).length : null;
+  const auto = isRecs && recsMode === 'auto'; // consigli automatici "Per te"
+  const cnt = auto ? k => SG.list.filter(s => k === 'all' || s.c.kind === k).length : isRecs ? k => recs.filter(r => k === 'all' || r.kind === k).length : isCommon ? k => pairs.filter(p => k === 'all' || p[0].kind === k).length : null;
   document.querySelectorAll('#kinds button').forEach(b => {
     const k = b.dataset.k;
     b.hidden = (k === 'all' && lib) || (k === 'stats' && !lib);
@@ -308,8 +311,8 @@ function render() {
   // visibilità per vista
   const showList = lib && !stats;
   $('list').hidden = !showList; $('recs').hidden = !isRecs; $('commonbody').hidden = !isCommon; $('statsbody').hidden = !stats;
-  $('find').hidden = stats; $('sortw').hidden = !showList; $('chips').hidden = !(showList || isRecs);
-  $('tools').hidden = !((mineV && !stats) || isRecs); $('man').hidden = $('imp').hidden = !(mineV && !stats);
+  $('find').hidden = stats || auto; $('sortw').hidden = !showList; $('chips').hidden = !(showList || (isRecs && !auto)); $('rmode').hidden = !isRecs;
+  $('tools').hidden = !((mineV && !stats) || (isRecs && !auto)); $('man').hidden = $('imp').hidden = !(mineV && !stats);
   $('q').placeholder = isRecs ? 'Cerca un titolo da consigliare…' : isCommon ? 'Filtra le opere in comune' : view === 'other' ? 'Filtra la sua lista' : 'Filtra o cerca online…';
   const notes = [];
   if (view === 'other') notes.push(`${ic('eye')}<span>Stai guardando la libreria di ${esc(names.other)}: sola lettura.</span>`);
@@ -322,11 +325,15 @@ function render() {
   $('hname').textContent = hn;
   $('hav').hidden = isRecs || isCommon; $('hav').className = 'av lg u' + uidx(uid); $('hav').textContent = (hn[0] || '?').toUpperCase();
   $('hsub').hidden = !(isRecs || isCommon);
-  $('hsub').textContent = isRecs ? `Cosa ci stiamo consigliando. Scegli il tipo, cerca un titolo e proponilo a ${names.other}.` : 'Le opere che avete entrambi, con i vostri voti a confronto.';
+  $('hsub').textContent = auto ? 'Suggerimenti calcolati dai tuoi voti e dai tuoi preferiti, con le raccomandazioni degli utenti di AniList.' : isRecs ? `Cosa ci stiamo consigliando. Scegli il tipo, cerca un titolo e proponilo a ${names.other}.` : 'Le opere che avete entrambi, con i vostri voti a confronto.';
   $('stats').hidden = isRecs;
   if (anim) fade($('hero'));
 
-  if (isRecs) {
+  if (auto) {
+    document.querySelectorAll('#rmode button').forEach(b => b.setAttribute('aria-pressed', b.dataset.m === recsMode));
+    $('recs').classList.toggle('anim', anim); $('recs').innerHTML = suggestHTML(); ensureSuggestions();
+  } else if (isRecs) {
+    document.querySelectorAll('#rmode button').forEach(b => b.setAttribute('aria-pressed', b.dataset.m === recsMode));
     const inKind = r => kind === 'all' || r.kind === kind;
     $('chips').innerHTML = [['all', 'Tutti', recs.filter(inKind).length], ...profOrder().map(p => [p.id, p.name, recs.filter(r => inKind(r) && r.user_id === p.id).length])]
       .map(([v, l, n]) => `<button class="chip" data-s="${v}" aria-pressed="${v === rfilter}">${esc(l)}<em>${n}</em></button>`).join('');
@@ -370,10 +377,10 @@ function render() {
     else if (all.length && (q || sfv)) $('list').innerHTML = empty('search', 'Nessun risultato', 'Prova a cambiare filtro o a cancellare la ricerca.');
     else $('list').innerHTML = mineV
       ? empty('library', `Nessun ${KINDS[kind].toLowerCase()} ancora`, 'Cerca un titolo online: copertina e numero di volumi si compilano da soli. Oppure importa un elenco da file di testo.',
-          `<button class="btn pri" data-go="search">${ic('search')}Cerca online</button><button class="btn" data-go="import">${ic('upload')}Importa da file</button>`)
+          `<button class="btn pri" data-go="search">${ic('search')}Cerca online</button><button class="btn" data-go="import">${ic('upload')}Importa dalle note</button>`)
       : empty('inbox', `${esc(names.other)} non ha ancora aggiunto ${KINDS[kind].toLowerCase()}`, 'Quando lo farà, li vedrai qui.');
   }
-  requestAnimationFrame(() => { slide($('views')); slide($('kinds')); });
+  requestAnimationFrame(() => { slide($('views')); slide($('kinds')); slide($('rmode')); });
 }
 
 // ---------- scheda titolo ----------
@@ -442,44 +449,13 @@ function openMenu() {
     <div class="list">
       ${online() ? rowBtn('rename', 'pencil', 'Cambia nome') : ''}
       ${online() && migrated() ? rowBtn('sync', 'refresh', 'Aggiorna ora le opere in corso') : ''}
+      ${online() && items.some(x => x.user_id === me?.id && x.cover_url && !x.cover_path) ? rowBtn('covers', 'refresh', `Salva le copertine mancanti (${items.filter(x => x.user_id === me?.id && x.cover_url && !x.cover_path).length})`) : ''}
       ${me ? rowBtn('backup', 'download', 'Scarica il backup della mia libreria (JSON)') : ''}
       ${L.length && online() ? rowBtn('legacy', 'upload', `Importa la vecchia lista locale (${L.length} titoli)`) : ''}
       ${session ? rowBtn('logout', 'logout', 'Esci', 'danger') : ''}
     </div></div>`;
   show();
 }
-function openImport() {
-  $('dlg').innerHTML = `<div class="dlg" tabindex="-1" autofocus>${xBtn}<h2>Importa da file di testo</h2>
-    <p>Un titolo per riga (righe vuote o che iniziano con # sono ignorate). Ogni titolo viene cercato su AniList e aggiunto col primo risultato come “da leggere/vedere”. Controlla il registro: il primo risultato può essere sbagliato.</p>
-    <label class="field"><span class="fl">File .txt</span><input type="file" id="ifile" accept=".txt,text/plain"></label>
-    <label class="field"><span class="fl">Oppure incolla qui i titoli</span><textarea id="itxt" rows="6"></textarea></label>
-    <label class="field"><span class="fl">Tipo</span><select id="ikind">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}"${k === kind ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-    <pre id="log" hidden></pre>
-    <div class="foot-acts"><button class="btn" data-act="close">Chiudi</button><button class="btn pri" data-act="runimport">Avvia importazione</button></div></div>`;
-  $('ifile').onchange = async e => { if (e.target.files[0]) $('itxt').value = await e.target.files[0].text(); };
-  show();
-}
-async function runImport() {
-  const k = $('ikind').value, lines = [...new Set($('itxt').value.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#')))];
-  if (!lines.length) return;
-  const log = $('log'), btn = document.querySelector('[data-act=runimport]');
-  log.hidden = false; log.textContent = ''; btn.disabled = true; stopImport = false;
-  let ok = 0;
-  for (let i = 0; i < lines.length && !stopImport; i++) {
-    if (i) await sleep(900); // AniList limita le richieste al minuto
-    log.textContent += `[${i + 1}/${lines.length}] ${lines[i]} … `; log.scrollTop = log.scrollHeight;
-    try {
-      const [m] = await ani(k, lines[i]);
-      if (!m) { log.textContent += 'NON TROVATO\n'; continue; }
-      if (hasItem(k, m.id)) { log.textContent += `già presente (${mt(m)})\n`; continue; }
-      const x = await addItem(fromMedia(m, k));
-      log.textContent += `→ ${mt(m)}${await uploadCover(x) ? '' : ' (copertina non salvata)'}\n`; ok++;
-    } catch (err) { log.textContent += `ERRORE ${err.message}\n`; }
-  }
-  log.textContent += `\nFinito: ${ok} aggiunti.`; log.scrollTop = log.scrollHeight; btn.disabled = false; render();
-}
-$('dlg').addEventListener('close', () => { stopImport = true; });
-
 async function importLegacy() {
   const L = legacyList();
   if (!L.length || !confirm(`Importare ${L.length} titoli della vecchia lista di questo browser nel tuo profilo?`)) return;
@@ -499,11 +475,11 @@ async function importLegacy() {
   render();
 }
 
-function recDialog(m) {
-  pending = { m, k: realKind() };
+function recDialog(m, k = realKind(), note = '') {
+  pending = { m, k };
   $('dlg').innerHTML = `<div class="dlg" tabindex="-1" autofocus>${xBtn}<h2>Consiglia ${esc(KINDS[pending.k].toLowerCase())}</h2>
     <div class="dh">${cover({ title: mt(m), cover_url: m.coverImage.large })}<div class="col"><h2 style="font-size:20px">${esc(mt(m))}</h2></div></div>
-    <label class="field"><span class="fl">Nota per ${esc(otherName())}</span><textarea id="rnote" rows="3" placeholder="Perché dovrebbe piacerti?"></textarea></label>
+    <label class="field"><span class="fl">Nota per ${esc(otherName())}</span><textarea id="rnote" rows="3" placeholder="Perché dovrebbe piacerti?">${esc(note)}</textarea></label>
     <div class="foot-acts"><button class="btn" data-act="close">Annulla</button><button class="btn pri" data-act="sendrec">${ic('bulb')}Invia consiglio</button></div></div>`;
   show();
 }
@@ -560,9 +536,9 @@ $('dlg').onclick = async e => {
       a.href = URL.createObjectURL(new Blob([JSON.stringify(items.filter(i => i.user_id === me.id), null, 1)], { type: 'application/json' }));
       a.download = `tracker-${new Date().toISOString().slice(0, 10)}.json`; a.click(); break;
     }
+    case 'covers': $('dlg').close(); queueCovers(items.filter(x => x.user_id === me?.id && x.cover_url && !x.cover_path)); break;
     case 'legacy': $('dlg').close(); await importLegacy(); break;
     case 'logout': $('dlg').close(); await doLogout(); break;
-    case 'runimport': await runImport(); break;
     case 'sendrec': await sendRec(); break;
   }
 };
@@ -617,13 +593,13 @@ $('list').onclick = e => {
   if (f) { e.stopPropagation(); return toggleFav(f.closest('.card').dataset.id); }
   const go = e.target.closest('[data-go]')?.dataset.go;
   if (go === 'search') return $('q').focus();
-  if (go === 'import') return openImport();
+  if (go === 'import') return openImporter();
   const p = e.target.closest('.card[data-id]'); if (p) openEdit(p.dataset.id);
 };
 const openFrom = e => { const o = e.target.closest('[data-open]')?.dataset.open; if (o) openEdit(o); };
 $('commonbody').onclick = openFrom; $('statsbody').onclick = openFrom;
 $('menu').onclick = openMenu;
-$('imp').onclick = openImport;
+$('imp').onclick = () => openImporter(); // definita in importer.js, che si carica dopo
 $('man').onclick = async () => {
   const title = prompt('Titolo?'); if (!title?.trim()) return;
   try { await addItem({ title: title.trim() }); render(); } catch (err) { msg('Aggiunta fallita: ' + err.message, 1); }
@@ -673,7 +649,7 @@ $('recs').onclick = async e => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden && online() && Date.now() - lastRefresh > 30000) refresh(); });
 addEventListener('online', () => { session && refresh(); });
 addEventListener('offline', render);
-addEventListener('resize', () => { slide($('views')); slide($('kinds')); });
+addEventListener('resize', () => { slide($('views')); slide($('kinds')); slide($('rmode')); });
 addEventListener('scroll', () => $('top').classList.toggle('scrolled', scrollY > 4), { passive: true });
 document.fonts?.ready.then(() => { slide($('views')); slide($('kinds')); });
 

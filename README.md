@@ -7,7 +7,9 @@ Sito statico (HTML, CSS e JavaScript, nessuna fase di build) che usa [Supabase](
 ## Funzioni
 - **Due profili** con login: ognuno scrive solo sulle proprie righe, l'altro può solo leggere.
 - **Quattro tipi**: manga, manhwa, novel, anime. Per ogni titolo: stato, volumi letti o episodi visti, volumi posseduti, voto, recensione, copertina.
-- **Ricerca online** su [AniList](https://anilist.co): copertina e numero di volumi o episodi si compilano da soli. Importazione di un elenco di titoli da file di testo.
+- **Ricerca online** su [AniList](https://anilist.co): copertina e numero di volumi o episodi si compilano da soli.
+- **Importazione guidata dalle note**: si incolla un elenco anche disordinato (puntini, numeri, caselle, voti, volumi, intestazioni come "Manga" o "Letti", emoji ✅ ❤️). Ogni titolo viene cercato su AniList e si sceglie un abbinamento alla volta (manga, manhwa, novel o anime, copertina, stato, voto). I titoli senza riscontro tornano in un elenco con il testo esatto delle note. L'importazione si può mettere in pausa e riprendere.
+- **Consigli automatici "Per te"**: calcolati dai voti, dai preferiti e da cosa hai completato o droppato, con le raccomandazioni degli utenti di AniList, e ogni suggerimento spiega il perché.
 - **Preferiti** sempre in cima alla lista.
 - **Volumi mancanti** calcolati da posseduti e totale ("Mancano 28 volumi: 13-14, 16-41").
 - **In comune**: i titoli che hanno entrambi, con i due voti a confronto.
@@ -20,6 +22,8 @@ Sito statico (HTML, CSS e JavaScript, nessuna fase di build) che usa [Supabase](
 | Parte | Dove |
 |---|---|
 | Interfaccia | `index.html`, `app.js`, `stats.js` (nessuna dipendenza da installare) |
+| Importazione dalle note | `notes.js` (lettura del testo e abbinamento, funzioni pure) e `importer.js` (schermate e coda delle copertine) |
+| Consigli automatici | `taste.js` (pesi e punteggi, funzioni pure) e `suggest.js` (richieste ad AniList, cache locale, schermata) |
 | Login, dati, copertine | Supabase: Auth con email e password, Postgres con Row Level Security, Storage |
 | Uso offline | `sw.js` (service worker) e `manifest.webmanifest` |
 | Librerie incluse | `vendor/`: supabase-js e i font Outfit e Work Sans, quindi nessun CDN |
@@ -27,6 +31,14 @@ Sito statico (HTML, CSS e JavaScript, nessuna fase di build) che usa [Supabase](
 | Manutenzione | `.github/workflows/ping.yml` |
 
 Le copertine e i dati **non** sono in questo repository: stanno nel progetto Supabase.
+
+## Come funzionano i consigli automatici
+1. Ogni titolo che hai riceve un peso: voto rispetto alla tua media, +1,5 se è un preferito, un po' per i completati, negativo per i droppati; i "da leggere" non contano.
+2. I pesi formano un profilo dei gusti sui generi e sui tag di AniList (con una correzione perché un tag visto una volta sola non pesi troppo).
+3. I candidati arrivano dalle raccomandazioni della community per i titoli che ami e dai titoli più popolari per i tuoi tag, escludendo quelli che hai già o hai scartato.
+4. Ogni candidato riceve un punteggio (somiglianza di tag, forza delle raccomandazioni, piccolo contributo del voto medio) e la lista viene diversificata per non proporre dieci titoli quasi identici.
+
+Tutto avviene nel browser: ad AniList vanno solo i numeri dei titoli e i tag cercati, nessun voto né dato personale. I risultati si tengono in cache sul dispositivo per qualche giorno. "Non mi interessa" è ricordato solo su quel dispositivo.
 
 ## Sicurezza
 - In `config.js` ci sono l'URL del progetto e la chiave **publishable** di Supabase. È fatta per stare nel browser: la protezione non dipende dalla sua segretezza ma dalle regole **RLS** dello schema (lettura per gli utenti loggati, scrittura solo sulle proprie righe).
