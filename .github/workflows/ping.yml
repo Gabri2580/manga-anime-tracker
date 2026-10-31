@@ -1,0 +1,32 @@
+name: Ping Supabase
+# Ogni lunedì:
+#  1) una richiesta al database: evita la pausa per inattività del piano gratuito di Supabase;
+#  2) se l'ultimo commit ha 45+ giorni ne crea uno vuoto: GitHub disattiva i workflow programmati
+#     dei repository pubblici dopo 60 giorni senza attività, e senza questo il ping si fermerebbe da solo.
+# Se il ping fallisce (es. progetto in pausa) il workflow risulta "failed" e GitHub avvisa via email il proprietario.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: write   # serve solo al commit di keepalive
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ping al database
+        run: |
+          URL=$(grep -oP "url:\s*'\K[^']+" config.js)
+          KEY=$(grep -oP "key:\s*'\K[^']+" config.js)
+          curl -fsS "$URL/rest/v1/profiles?select=id&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+      - name: Keepalive del repository
+        run: |
+          AGE=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Ultimo commit: $AGE giorni fa"
+          if [ "$AGE" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive (nessuna attività da $AGE giorni)"
+            git push
+          fi

@@ -1,0 +1,12 @@
+# Non vanno pubblicati: note personali, vecchia versione locale, guida privata
+NOTE.md
+SETUP.md
+old-local.html
+
+# Segreti e sporcizia
+.env
+.env.*
+*.log
+node_modules/
+Thumbs.db
+.DS_Store
